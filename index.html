@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Twitch Clip Compiler</title>
+        <link href="./css/bootstrap.min.css" rel="stylesheet">
+        <style>
+            body {
+                background-color: #f8fafc;
+                color: #333333;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                margin-top: 5%;
+            }
+
+            .form-floating > label {
+                margin-left: 1%;
+            }
+
+            #submitButton {
+                background-color: #6441a5;
+            }
+
+            #infoText {
+                text-align: center;
+            }
+
+            .spinner-border {
+                visibility: hidden;
+                color: #6441a5;
+                margin: 0px auto
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="col-md-4 offset-md-4">
+                <h2 class="mb-4">Compile clips from...</h2>
+                
+                <form id="mainForm" class="row g-3 needs-validation" novalidate>
+                    <div class="form-floating mb-2">
+                        <input type="text" class="form-control shadow-none" id="username" required>
+                        <label for="username">Twitch Username</label>    
+                        <div class="invalid-feedback">
+                            Please enter a twitch username.
+                        </div>
+                    </div>
+
+                    <div class="form-floating mb-2">
+                        <input type="date" class="form-control shadow-none" id="startDate" required>
+                        <label for="startDate">Start Date</label>
+                        <div class="invalid-feedback">
+                            Please enter a start date.
+                        </div>
+                    </div>
+
+                    <div class="form-floating mb-2">
+                        <input type="date" class="form-control shadow-none" id="endDate" required>
+                        <label for="endDate">End Date</label>
+                        <div class="invalid-feedback">
+                            Please enter an end date.
+                        </div>
+                    </div>
+
+                    <div class="form-floating mb-2">
+                        <input type="number" class="form-control shadow-none" id="amount" min=1 max=10 required>
+                        <label for="amount">Amount (max of 10)</label>
+                        <div class="invalid-feedback">
+                            Please enter a valid amount from 1 to 10.
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary border-0" id="submitButton">
+                        Download
+                    </button>
+                    <span id="spinner" class="spinner-border" role="status"></span>
+                    <br/>
+                    <div id="infoText"></div>
+                </form>
+            </div>
+        </div>
+
+        <script src="./js/jquery-3.7.1.min.js"></script>
+        <script src="./js/bootstrap.min.js"></script>
+        <script>
+            const errorColor = "#B00020"
+            const successColor = "#2E7D32"
+            var spinner = document.getElementById('spinner')
+            var submitBtn = document.getElementById('submitButton')
+
+            function showInfoText(msg, color) {
+                var infoText = document.getElementById('infoText')
+                infoText.innerText = msg
+                infoText.style.color = color
+            }
+
+            (function () {
+                'use strict'
+                var form = document.getElementById('mainForm')
+                form.addEventListener('submit', function (event) {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    if (form.checkValidity()) {
+                        var msg = `Please wait while the clips are being fetched and processed.
+                        The compilation will be automatically downloaded once processing is complete.`
+                        submitBtn.style.visibility = 'hidden'
+                        spinner.style.visibility = 'visible'
+                        showInfoText(msg, "#000000")
+
+                        var data = {
+                            "username": document.getElementById("username").value,
+                            "start": document.getElementById("startDate").value,
+                            "end": document.getElementById("endDate").value,
+                            "count": Number(document.getElementById("amount").value),
+                        }
+        
+                        const url = "https://aaiob3f6x1.execute-api.ap-southeast-1.amazonaws.com/prod/compilation-link"
+                        fetch(url,{
+                            method: "POST",
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify(data)
+                        })
+                        .then(resp => {
+                            if (resp.ok) {
+                                return resp.json()
+                            } else {
+                                var error
+                                resp.json().then(json => {
+                                    throw new Error(json.error_message)
+                                }).catch(error => {
+                                    showInfoText(error, errorColor)
+                                    stopLoading()
+                                })
+                            }
+                        })
+                        .then(json => {
+                            var id = json.id
+                            startPolling(id)
+                        })
+                        .catch(error => {
+                            showInfoText(error, errorColor)
+                            stopLoading()
+                        })
+                    }
+                    form.classList.add('was-validated')
+                }, false)
+            })()
+
+            function startPolling(id) {
+                const pollInterval = setInterval(() => {
+                    const url = `https://ycej5btfuh.execute-api.ap-southeast-1.amazonaws.com/prod/compilation-link/${id}`
+                    fetch(url)
+                    .then(resp => {
+                        if (resp.status !== 404) {
+                            clearInterval(pollInterval)
+                            handleResponse(resp)
+                        }
+                    })
+                    .catch(error => {
+                        clearInterval(pollInterval)
+                        showInfoText(error, errorColor)
+                    })
+                }, 5000);
+
+                setTimeout(() => {
+                    clearInterval(pollInterval)
+                    const error = `Error: Request timed out.` 
+                    showInfoText(error, errorColor)
+                }, 300000);
+            }
+
+            function handleResponse(resp) {
+                resp.json()
+                .then(data => ({status: resp.status, body: data}))
+                .then(data => {
+                    if (data.status !== 200) {
+                        showInfoText(data.body.error_message, errorColor)
+                    } else {
+                        downloadFile(data.body.url)
+                        showInfoText("Successfully generated and downloaded compilation!", successColor)
+                    }
+                })
+                .catch(error => {
+                    showInfoText(error, errorColor)
+                })
+                .finally(() => {
+                    stopLoading()
+                })
+            }
+
+            function downloadFile(fileUrl) {
+                const link = document.createElement('a');
+                link.href = fileUrl;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+
+            function stopLoading() {
+                spinner.style.visibility = 'hidden'
+                submitBtn.style.visibility = 'visible'
+            }
+
+        </script>
+    </body>
+</html>
