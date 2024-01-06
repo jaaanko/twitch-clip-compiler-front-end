@@ -151,25 +151,30 @@
             })()
 
             function startPolling(id) {
+                var cleared = false
                 const pollInterval = setInterval(() => {
                     const url = `https://ycej5btfuh.execute-api.ap-southeast-1.amazonaws.com/prod/compilation-link/${id}`
                     fetch(url)
                     .then(resp => {
                         if (resp.status !== 404) {
                             clearInterval(pollInterval)
+                            cleared = true
                             handleResponse(resp)
                         }
                     })
                     .catch(error => {
                         clearInterval(pollInterval)
+                        cleared = true
                         showInfoText(error, errorColor)
                     })
                 }, 5000);
 
                 setTimeout(() => {
-                    clearInterval(pollInterval)
-                    const error = `Error: Request timed out.` 
-                    showInfoText(error, errorColor)
+                    if (!cleared) {
+                        clearInterval(pollInterval)
+                        const error = `Error: Request timed out.`     
+                        showInfoText(error, errorColor)
+                    }
                 }, 300000);
             }
 
@@ -177,8 +182,8 @@
                 resp.json()
                 .then(data => ({status: resp.status, body: data}))
                 .then(data => {
-                    if (data.status !== 200) {
-                        showInfoText(data.body.error_message, errorColor)
+                    if (data.body.status !== 0) {
+                        throw new Error(data.body.error_message, errorColor)
                     } else {
                         downloadFile(data.body.url)
                         showInfoText("Successfully generated and downloaded compilation!", successColor)
